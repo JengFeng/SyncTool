@@ -30,5 +30,16 @@ public sealed class SyncControlModelTests : IDisposable
         Assert.False(File.Exists(legacy));
     }
 
+    [Theory]
+    [InlineData(SyncMode.TwoWay, "雙方")]
+    [InlineData(SyncMode.AToB, "A")]
+    [InlineData(SyncMode.BToA, "B")]
+    [InlineData(SyncMode.Preview, "不寫入")]
+    public void Every_sync_mode_has_a_clear_chinese_description(SyncMode mode, string expectedPhrase)
+    {
+        var description = SyncModeNames.Description(mode);
+        Assert.Contains(expectedPhrase, description); Assert.True(description.Length > 20);
+    }
+
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

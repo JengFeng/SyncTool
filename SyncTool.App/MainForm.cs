@@ -8,6 +8,7 @@ public sealed class MainForm : Form
     private readonly string _configPath;
     private readonly AppConfig _config;
     private readonly NotifyIcon _tray;
+    private readonly ToolTip _toolTips = new() { AutoPopDelay = 12000, InitialDelay = 300, ReshowDelay = 100 };
     private readonly ListView _jobs = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Microsoft JhengHei UI", 10) };
     private readonly ListView _logs = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Microsoft JhengHei UI", 9) };
     private readonly Label _status = new() { AutoSize = true, Font = new Font("Microsoft JhengHei UI", 12, FontStyle.Bold), ForeColor = Color.FromArgb(36, 64, 98) };
@@ -37,11 +38,13 @@ public sealed class MainForm : Form
     {
         _jobs.Columns.Add("名稱", 135); _jobs.Columns.Add("來源 A", 185); _jobs.Columns.Add("目標 B", 185); _jobs.Columns.Add("頻率", 80); _jobs.Columns.Add("模式", 105); _jobs.Columns.Add("狀態", 90); _jobs.Columns.Add("下次同步", 135);
         _jobs.SelectedIndexChanged += (_, _) => { _selected = _jobs.SelectedItems.Count == 0 ? null : (SyncJobDefinition?)_jobs.SelectedItems[0].Tag; RenderSelected(); };
+        _jobs.MouseMove += (_, e) => ShowModeToolTip(e.Location);
         _logs.Columns.Add("時間", 145); _logs.Columns.Add("工作", 125); _logs.Columns.Add("類型", 75); _logs.Columns.Add("路徑／訊息（雙擊查看完整內容）", 510); _logs.Columns.Add("結果", 80);
         _logs.DoubleClick += (_, _) => ShowSelectedLogDetail();
 
         var title = new Label { Text = "同步工作", Dock = DockStyle.Top, Height = 27, Font = new Font("Microsoft JhengHei UI", 11, FontStyle.Bold), Padding = new Padding(0, 5, 0, 0), ForeColor = Color.FromArgb(36, 64, 98) };
         var topButtons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, Padding = new Padding(0, 6, 0, 4), BackColor = Color.FromArgb(248, 249, 250) };
+        topButtons.Controls.Add(Button("同步模式說明", (_, _) => ShowModeGuide()));
         topButtons.Controls.Add(Button("新增工作", (_, _) => EditJob(null)));
         topButtons.Controls.Add(Button("編輯工作", (_, _) => { if (_selected is not null) EditJob(_selected); }));
         topButtons.Controls.Add(Button("封存工作", (_, _) => ArchiveSelected()));
@@ -76,6 +79,25 @@ public sealed class MainForm : Form
     }
 
     private static Button Button(string text, EventHandler handler) { var button = new Button { Text = text, AutoSize = true, BackColor = Color.FromArgb(0, 120, 212), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; button.Click += handler; return button; }
+
+    private void ShowModeToolTip(Point location)
+    {
+        var hit = _jobs.HitTest(location);
+        var description = hit.Item?.Tag is SyncJobDefinition job && hit.SubItem == hit.Item.SubItems[4]
+            ? $"{SyncModeNames.Display(job.DefaultMode)}\r\n{SyncModeNames.Description(job.DefaultMode)}"
+            : string.Empty;
+        _toolTips.SetToolTip(_jobs, description);
+    }
+
+    private void ShowModeGuide()
+    {
+        var lines = Enum.GetValues<SyncMode>().Select(mode => $"【{SyncModeNames.Display(mode)}】\r\n{SyncModeNames.Description(mode)}");
+        using var dialog = new Form { Text = "同步模式說明", ClientSize = new Size(760, 430), MinimumSize = new Size(580, 330), StartPosition = FormStartPosition.CenterParent, Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application };
+        var header = new Label { Dock = DockStyle.Top, Height = 54, Padding = new Padding(14, 9, 14, 0), Font = new Font("Microsoft JhengHei UI", 10, FontStyle.Bold), Text = "選擇工作時，請先確認此處的同步模式。單向模式首次執行或切換模式時，系統一定先要求預覽與確認。" };
+        var text = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = true, BackColor = Color.White, Font = new Font("Microsoft JhengHei UI", 10), Text = string.Join("\r\n\r\n", lines) };
+        var close = new Button { Text = "關閉", Dock = DockStyle.Bottom, Height = 38, DialogResult = DialogResult.OK };
+        dialog.Controls.Add(text); dialog.Controls.Add(header); dialog.Controls.Add(close); dialog.ShowDialog(this);
+    }
 
     private void RefreshJobs()
     {
