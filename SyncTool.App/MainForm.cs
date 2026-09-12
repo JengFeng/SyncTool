@@ -11,6 +11,7 @@ public sealed class MainForm : Form
     private readonly ListView _jobs = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Microsoft JhengHei UI", 10) };
     private readonly ListView _logs = new() { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Microsoft JhengHei UI", 9) };
     private readonly Label _status = new() { AutoSize = true, Font = new Font("Microsoft JhengHei UI", 12, FontStyle.Bold), ForeColor = Color.FromArgb(36, 64, 98) };
+    private readonly Label _mode = new() { AutoSize = true, Font = new Font("Microsoft JhengHei UI", 10, FontStyle.Bold), ForeColor = Color.FromArgb(0, 102, 153) };
     private readonly Label _detail = new() { AutoSize = false, Height = 24, Dock = DockStyle.Top, AutoEllipsis = true, ForeColor = Color.FromArgb(75, 75, 75) };
     private readonly ProgressBar _progress = new() { Dock = DockStyle.Top, Height = 18, Margin = new Padding(0, 5, 0, 6) };
     private readonly System.Windows.Forms.Timer _scheduler = new() { Interval = 30000 };
@@ -57,9 +58,9 @@ public sealed class MainForm : Form
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 310, Panel1MinSize = 190, Panel2MinSize = 150, IsSplitterFixed = false };
         split.Panel1.Controls.Add(jobsPanel); split.Panel2.Controls.Add(logPanel);
 
-        var statusPanel = new Panel { Dock = DockStyle.Top, Height = 82, Padding = new Padding(14, 9, 14, 8), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
-        _status.Dock = DockStyle.Top; _status.Height = 25;
-        statusPanel.Controls.Add(_detail); statusPanel.Controls.Add(_progress); statusPanel.Controls.Add(_status);
+        var statusPanel = new Panel { Dock = DockStyle.Top, Height = 104, Padding = new Padding(14, 9, 14, 8), BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
+        _status.Dock = DockStyle.Top; _status.Height = 25; _mode.Dock = DockStyle.Top; _mode.Height = 22;
+        statusPanel.Controls.Add(_detail); statusPanel.Controls.Add(_progress); statusPanel.Controls.Add(_mode); statusPanel.Controls.Add(_status);
         Controls.Add(split); Controls.Add(statusPanel);
     }
 
@@ -95,8 +96,9 @@ public sealed class MainForm : Form
 
     private void RenderSelected()
     {
-        if (_selected is null) { _status.Text = "請選擇同步工作"; _detail.Text = "新增工作後，先測試路徑，再啟用或立即同步。"; return; }
+        if (_selected is null) { _status.Text = "請選擇同步工作"; _mode.Text = "同步模式：—"; _detail.Text = "新增工作後，先測試路徑，再啟用或立即同步。"; return; }
         _status.Text = _selected.IsEnabled ? $"已選擇：{_selected.Name}" : $"已選擇：{_selected.Name}（暫停）";
+        _mode.Text = $"同步模式：{SyncModeNames.Display(_selected.DefaultMode)}";
         _detail.Text = $"A：{_selected.SourcePath}    B：{_selected.TargetPath}";
     }
 
