@@ -16,6 +16,29 @@ public sealed class CancellationTests : IDisposable
         Assert.False(File.Exists(state));
     }
 
+    [Fact]
+    public async Task Cancellation_requested_when_scanning_starts_stops_before_scanning_target()
+    {
+        var a = Create("scan-A");
+        var target = Create("scan-B");
+        await File.WriteAllTextAsync(Path.Combine(a, "data.txt"), "data");
+        using var cancellation = new CancellationTokenSource();
+        var progress = new CancelWhenScanning(cancellation);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new SyncEngine(new SyncOptions
+        {
+            SourcePath = a, TargetPath = target, StateFilePath = Path.Combine(_root, "state.json")
+        }).RunAsync(false, progress, cancellation.Token));
+    }
+
+    private sealed class CancelWhenScanning(CancellationTokenSource cancellation) : IProgress<SyncProgress>
+    {
+        public void Report(SyncProgress value)
+        {
+            if (value.Stage == SyncStage.Scanning) cancellation.Cancel();
+        }
+    }
+
     private string Create(string relative) { var path = Path.Combine(_root, relative); Directory.CreateDirectory(path); return path; }
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

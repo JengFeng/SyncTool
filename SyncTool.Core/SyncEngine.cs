@@ -61,8 +61,9 @@ public sealed class SyncEngine
             try
             {
                 progress?.Report(new(SyncStage.Scanning, 0, 0, "", "正在掃描來源 A 與目標 B…"));
-                var aFiles = ScanFiles(_options.SourcePath);
-                var bFiles = ScanFiles(_options.TargetPath);
+                cancellationToken.ThrowIfCancellationRequested();
+                var aFiles = ScanFiles(_options.SourcePath, cancellationToken);
+                var bFiles = ScanFiles(_options.TargetPath, cancellationToken);
                 var previous = LoadState();
                 var effectiveDryRun = dryRun || _options.Mode == SyncMode.Preview;
                 var fingerprint = ScanFingerprint(aFiles, bFiles);
@@ -107,7 +108,7 @@ public sealed class SyncEngine
 
                 result.RequiresApproval = effectiveDryRun && (_options.Mode is SyncMode.AToB or SyncMode.BToA) && (result.RiskOperationCount > _options.RiskOperationThreshold || result.RiskBytes > _options.RiskBytesThreshold);
                 if (result.RequiresApproval) result.Events.Add($"RISK-APPROVAL-REQUIRED: operations={result.RiskOperationCount} bytes={result.RiskBytes}");
-                if (!effectiveDryRun && !result.HasPendingConflicts) SaveState();
+                if (!effectiveDryRun && !result.HasPendingConflicts) SaveState(cancellationToken);
                 result.Success = true;
                 progress?.Report(new(SyncStage.Completed, processed, all.Count, "", "同步完成"));
             }
@@ -312,7 +313,7 @@ public sealed class SyncEngine
 
     private static string Stamp(FileEntry? entry) => entry is null ? "-" : $"{entry.Length}:{entry.LastWriteUtc.Ticks}";
 
-    private Dictionary<string, FileEntry> ScanFiles(string root)
+    private Dictionary<string, FileEntry> ScanFiles(string root, CancellationToken cancellationToken)
     {
         var map = new Dictionary<string, FileEntry>(StringComparer.OrdinalIgnoreCase);
         var enumeration = new EnumerationOptions
@@ -323,6 +324,7 @@ public sealed class SyncEngine
         };
         foreach (var path in Directory.EnumerateFiles(root, "*", enumeration))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Check the raw leaf name before FileInfo touches Windows device aliases such as NUL.
             if (WindowsPathRules.IsReservedDeviceName(Path.GetFileName(path))) continue;
             try
@@ -399,11 +401,12 @@ public sealed class SyncEngine
         catch { /* diagnostics must never weaken fail-closed validation */ }
     }
 
-    private void SaveState()
+    private void SaveState(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.StateFilePath)) return;
-        var a = ScanFiles(_options.SourcePath);
-        var b = ScanFiles(_options.TargetPath);
+        cancellationToken.ThrowIfCancellationRequested();
+        var a = ScanFiles(_options.SourcePath, cancellationToken);
+        var b = ScanFiles(_options.TargetPath, cancellationToken);
         var state = a.Keys.Union(b.Keys, StringComparer.OrdinalIgnoreCase).ToDictionary(k => k, k => new SyncPair(a.GetValueOrDefault(k)?.ToStamp(), b.GetValueOrDefault(k)?.ToStamp()), StringComparer.OrdinalIgnoreCase);
         var path = _options.StateFilePath!;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
