@@ -6,6 +6,7 @@
 # Local releases and executable/runtime data
 publish*/
 e2e-*/
+acceptance/
 jobs/
 logs/
 backups/
