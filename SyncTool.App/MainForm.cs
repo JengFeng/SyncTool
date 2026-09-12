@@ -18,6 +18,9 @@ public sealed class MainForm : Form
     private readonly System.Windows.Forms.Timer _scheduler = new() { Interval = 30000 };
     private SyncJobDefinition? _selected;
     private bool _running;
+    private readonly SyncRunGuard _runGuard = new();
+    private readonly List<Control> _runLockedControls = [];
+    private Button? _cancelRunButton;
     private CancellationTokenSource? _currentRunCancellation;
 
     public MainForm(string configPath)
@@ -37,25 +40,34 @@ public sealed class MainForm : Form
     private void BuildUi()
     {
         _jobs.Columns.Add("名稱", 135); _jobs.Columns.Add("來源 A", 185); _jobs.Columns.Add("目標 B", 185); _jobs.Columns.Add("頻率", 80); _jobs.Columns.Add("模式", 105); _jobs.Columns.Add("狀態", 90); _jobs.Columns.Add("下次同步", 135);
-        _jobs.SelectedIndexChanged += (_, _) => { _selected = _jobs.SelectedItems.Count == 0 ? null : (SyncJobDefinition?)_jobs.SelectedItems[0].Tag; RenderSelected(); };
+        _jobs.SelectedIndexChanged += (_, _) =>
+        {
+            if (!_runGuard.CanChangeSelectedJob) return;
+            _selected = _jobs.SelectedItems.Count == 0 ? null : (SyncJobDefinition?)_jobs.SelectedItems[0].Tag;
+            RenderSelected();
+        };
         _jobs.MouseMove += (_, e) => ShowModeToolTip(e.Location);
         _logs.Columns.Add("時間", 145); _logs.Columns.Add("工作", 125); _logs.Columns.Add("類型", 75); _logs.Columns.Add("路徑／訊息（雙擊查看完整內容）", 510); _logs.Columns.Add("結果", 80);
         _logs.DoubleClick += (_, _) => ShowSelectedLogDetail();
 
-        var title = new Label { Text = "同步工作", Dock = DockStyle.Top, Height = 27, Font = new Font("Microsoft JhengHei UI", 11, FontStyle.Bold), Padding = new Padding(0, 5, 0, 0), ForeColor = Color.FromArgb(36, 64, 98) };
+        var titlePanel = new Panel { Dock = DockStyle.Top, Height = 27 };
+        var title = new Label { Text = "同步工作", Dock = DockStyle.Fill, Font = new Font("Microsoft JhengHei UI", 11, FontStyle.Bold), Padding = new Padding(0, 5, 0, 0), ForeColor = Color.FromArgb(36, 64, 98) };
+        var modeHelp = new Button { Text = "?", Dock = DockStyle.Right, Width = 27, Height = 27, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 }, BackColor = Color.Transparent, ForeColor = Color.FromArgb(0, 102, 153), Font = new Font("Segoe UI", 10, FontStyle.Bold), AccessibleName = "同步模式說明" };
+        modeHelp.Click += (_, _) => ShowModeGuide(); _toolTips.SetToolTip(modeHelp, "同步模式說明：點擊查看四種模式的差異與安全規則。"); _runLockedControls.Add(modeHelp);
+        titlePanel.Controls.Add(title); titlePanel.Controls.Add(modeHelp);
         var topButtons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 46, Padding = new Padding(0, 6, 0, 4), BackColor = Color.FromArgb(248, 249, 250) };
-        topButtons.Controls.Add(Button("同步模式說明", (_, _) => ShowModeGuide()));
-        topButtons.Controls.Add(Button("新增工作", (_, _) => EditJob(null)));
-        topButtons.Controls.Add(Button("編輯工作", (_, _) => { if (_selected is not null) EditJob(_selected); }));
-        topButtons.Controls.Add(Button("封存工作", (_, _) => ArchiveSelected()));
-        topButtons.Controls.Add(Button("立即同步選取工作", async (_, _) => { if (_selected is not null) await RunJobAsync(_selected, false); }));
-        topButtons.Controls.Add(Button("取消本次同步", (_, _) => _currentRunCancellation?.Cancel()));
-        topButtons.Controls.Add(Button("預覽備份清理", (_, _) => { if (_selected is not null) ShowBackupCleanupPreview(_selected); }));
-        topButtons.Controls.Add(Button("處理待決衝突", (_, _) => { if (_selected is not null) ShowPendingConflicts(_selected); }));
-        topButtons.Controls.Add(Button("同步全部已啟用工作", async (_, _) => await RunAllAsync()));
+        void AddRunLockedButton(string text, EventHandler handler) { var button = Button(text, handler); _runLockedControls.Add(button); topButtons.Controls.Add(button); }
+        AddRunLockedButton("新增工作", (_, _) => EditJob(null));
+        AddRunLockedButton("編輯工作", (_, _) => { if (_selected is not null) EditJob(_selected); });
+        AddRunLockedButton("封存工作", (_, _) => ArchiveSelected());
+        AddRunLockedButton("立即同步選取工作", async (_, _) => { if (_selected is not null) await RunJobAsync(_selected, false); });
+        _cancelRunButton = Button("取消本次同步", (_, _) => _currentRunCancellation?.Cancel()); _cancelRunButton.Enabled = false; topButtons.Controls.Add(_cancelRunButton);
+        AddRunLockedButton("預覽備份清理", (_, _) => { if (_selected is not null) ShowBackupCleanupPreview(_selected); });
+        AddRunLockedButton("處理待決衝突", (_, _) => { if (_selected is not null) ShowPendingConflicts(_selected); });
+        AddRunLockedButton("同步全部已啟用工作", async (_, _) => await RunAllAsync());
 
         var jobsPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 0, 5) };
-        jobsPanel.Controls.Add(_jobs); jobsPanel.Controls.Add(topButtons); jobsPanel.Controls.Add(title);
+        jobsPanel.Controls.Add(_jobs); jobsPanel.Controls.Add(topButtons); jobsPanel.Controls.Add(titlePanel);
         var logTitle = new Label { Text = "同步日誌", Dock = DockStyle.Top, Height = 29, Font = new Font("Microsoft JhengHei UI", 11, FontStyle.Bold), Padding = new Padding(0, 6, 0, 0), ForeColor = Color.FromArgb(36, 64, 98) };
         var logPanel = new Panel { Dock = DockStyle.Fill }; logPanel.Controls.Add(_logs); logPanel.Controls.Add(logTitle);
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 310, Panel1MinSize = 190, Panel2MinSize = 150, IsSplitterFixed = false };
@@ -99,6 +111,14 @@ public sealed class MainForm : Form
         dialog.Controls.Add(text); dialog.Controls.Add(header); dialog.Controls.Add(close); dialog.ShowDialog(this);
     }
 
+    private void SetRunUiState(bool running)
+    {
+        _jobs.Enabled = !running;
+        _jobs.Cursor = running ? Cursors.No : Cursors.Default;
+        foreach (var control in _runLockedControls) control.Enabled = !running;
+        if (_cancelRunButton is not null) _cancelRunButton.Enabled = running;
+    }
+
     private void RefreshJobs()
     {
         _jobs.BeginUpdate();
@@ -107,7 +127,7 @@ public sealed class MainForm : Form
             _jobs.Items.Clear();
             foreach (var job in _config.ActiveJobs.OrderBy(j => j.Name, StringComparer.OrdinalIgnoreCase))
             {
-                var status = !job.IsEnabled ? "已暫停" : _running && ReferenceEquals(job, _selected) ? "同步中" : "已啟用";
+                var status = !job.IsEnabled ? "已暫停" : _runGuard.IsRunning && string.Equals(job.Id, _runGuard.RunningJobId, StringComparison.Ordinal) ? "同步中" : "已啟用";
                 var item = new ListViewItem(job.Name) { Tag = job };
                 item.SubItems.Add(job.SourcePath); item.SubItems.Add(job.TargetPath); item.SubItems.Add(job.SyncFrequency); item.SubItems.Add(SyncModeNames.Display(job.DefaultMode)); item.SubItems.Add(status); item.SubItems.Add(job.NextSyncAt?.ToLocalTime().ToString("yyyy/MM/dd HH:mm") ?? "—");
                 _jobs.Items.Add(item);
@@ -215,8 +235,8 @@ public sealed class MainForm : Form
     private async Task RunJobAsync(SyncJobDefinition job, bool dryRun)
     {
         if (_running) return;
-        _running = true; _selected = job; _currentRunCancellation = new CancellationTokenSource(); RefreshJobs();
-        _status.Text = $"{job.Name}：掃描中…"; _progress.Style = ProgressBarStyle.Marquee; _detail.Text = "正在掃描來源 A 與目標 B…"; _tray.Text = "SyncTool — 掃描中";
+        _running = true; _runGuard.Begin(job.Id); _selected = job; _currentRunCancellation = new CancellationTokenSource(); SetRunUiState(true); RefreshJobs();
+        _status.Text = $"{job.Name}：掃描中…"; _progress.Style = ProgressBarStyle.Marquee; _detail.Text = "正在掃描來源 A 與目標 B…（同步進行中，工作清單及設定操作已暫時鎖定；可按「取消本次同步」。）"; _tray.Text = "SyncTool — 掃描中";
         var progress = new Progress<SyncProgress>(p => RenderProgress(job, p));
         try
         {
@@ -233,7 +253,10 @@ public sealed class MainForm : Form
             _status.Text = $"{job.Name}：本次同步已取消"; _detail.Text = "未更新同步基準；下次同步會以既有基準重新安全評估。"; AddLogRow(job.Name, "CANCELLED", "使用者取消本次同步", "已取消");
         }
         catch (Exception ex) { _status.Text = $"{job.Name}：同步失敗"; _detail.Text = ex.Message; AddLogRow(job.Name, "ERROR", ex.Message, "失敗"); }
-        finally { _currentRunCancellation?.Dispose(); _currentRunCancellation = null; _running = false; RefreshJobs(); }
+        finally
+        {
+            _currentRunCancellation?.Dispose(); _currentRunCancellation = null; _runGuard.End(); _running = false; SetRunUiState(false); RefreshJobs();
+        }
     }
 
     private async Task<SyncResult> RunWithControlAsync(SyncJobDefinition job, bool dryRun, IProgress<SyncProgress> progress, CancellationToken cancellationToken)
