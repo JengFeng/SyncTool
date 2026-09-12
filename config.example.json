@@ -1,0 +1,21 @@
+{
+  "Jobs": [
+    {
+      "Name": "範例同步工作",
+      "SourcePath": "C:\\path\\to\\source-A",
+      "TargetPath": "C:\\path\\to\\google-drive-mounted-B",
+      "SyncFrequency": "Manual",
+      "IsEnabled": false,
+      "DefaultMode": 0,
+      "DeleteProtectionEnabled": true,
+      "ConflictCopiesEnabled": true,
+      "LockRetryEnabled": true,
+      "PreserveTargetExtras": false,
+      "ConflictPolicy": 0,
+      "RiskOperationThreshold": 100,
+      "RiskBytesThreshold": 10737418240,
+      "BackupRetentionDays": 90,
+      "IgnorePatterns": []
+    }
+  ]
+}

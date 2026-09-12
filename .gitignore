@@ -1,0 +1,24 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+*.pdb
+
+# Local releases and executable/runtime data
+publish*/
+e2e-*/
+jobs/
+logs/
+backups/
+previews/
+*.synctmp
+
+# Local configuration may contain real folder paths
+config.json
+
+# IDE and OS files
+.vs/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db

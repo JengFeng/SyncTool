@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SyncTool.Core", "SyncTool.Core\SyncTool.Core.csproj", "{74878209-1C57-409E-8AAD-B0AD466198CD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SyncTool.App", "SyncTool.App\SyncTool.App.csproj", "{87D7FBB9-B9D4-4FC1-8304-CC6E3A6659DC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SyncTool.Core.Tests", "SyncTool.Core.Tests\SyncTool.Core.Tests.csproj", "{935222D7-F5D0-40BE-B80A-978C9D6EB0D7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{74878209-1C57-409E-8AAD-B0AD466198CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{74878209-1C57-409E-8AAD-B0AD466198CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{74878209-1C57-409E-8AAD-B0AD466198CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{74878209-1C57-409E-8AAD-B0AD466198CD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{87D7FBB9-B9D4-4FC1-8304-CC6E3A6659DC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{87D7FBB9-B9D4-4FC1-8304-CC6E3A6659DC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{87D7FBB9-B9D4-4FC1-8304-CC6E3A6659DC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{87D7FBB9-B9D4-4FC1-8304-CC6E3A6659DC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{935222D7-F5D0-40BE-B80A-978C9D6EB0D7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{935222D7-F5D0-40BE-B80A-978C9D6EB0D7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{935222D7-F5D0-40BE-B80A-978C9D6EB0D7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{935222D7-F5D0-40BE-B80A-978C9D6EB0D7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
