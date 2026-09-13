@@ -67,12 +67,15 @@ public sealed class SyncEngine
                 cancellationToken.ThrowIfCancellationRequested();
                 var aFiles = ScanFiles(_options.SourcePath, cancellationToken);
                 var bFiles = ScanFiles(_options.TargetPath, cancellationToken);
+                var aEmptyDirectories = ScanEmptyDirectories(_options.SourcePath, aFiles, cancellationToken);
+                var bEmptyDirectories = ScanEmptyDirectories(_options.TargetPath, bFiles, cancellationToken);
                 result.AccessDeniedCount = CountUnreadableFiles(_options.SourcePath, aFiles, cancellationToken)
                     + CountUnreadableFiles(_options.TargetPath, bFiles, cancellationToken);
                 if (result.AccessDeniedCount > 0) throw new InvalidOperationException("SYNC_FILE_ACCESS_DENIED");
                 var previous = LoadState();
+                var previousEmptyDirectories = LoadEmptyDirectoryState();
                 var effectiveDryRun = dryRun || _options.Mode == SyncMode.Preview;
-                var fingerprint = ScanFingerprint(aFiles, bFiles);
+                var fingerprint = ScanFingerprint(aFiles, bFiles, aEmptyDirectories, bEmptyDirectories);
                 if (_options.Mode != SyncMode.Preview && !string.IsNullOrWhiteSpace(_options.PreviewRootPath))
                 {
                     var previews = new SyncPreviewStore(_options.PreviewRootPath!);
@@ -112,9 +115,17 @@ public sealed class SyncEngine
                         await HandleDifferenceAsync(relative, a, b, old, effectiveDryRun, result, cancellationToken);
                 }
 
+                var finalAEmptyDirectories = ScanEmptyDirectories(_options.SourcePath, ScanFiles(_options.SourcePath, cancellationToken), cancellationToken);
+                var finalBEmptyDirectories = ScanEmptyDirectories(_options.TargetPath, ScanFiles(_options.TargetPath, cancellationToken), cancellationToken);
+                await ReconcileEmptyDirectoriesAsync(finalAEmptyDirectories, finalBEmptyDirectories, previousEmptyDirectories, effectiveDryRun, result, cancellationToken);
+
                 result.RequiresApproval = effectiveDryRun && (_options.Mode is SyncMode.AToB or SyncMode.BToA) && (result.RiskOperationCount > _options.RiskOperationThreshold || result.RiskBytes > _options.RiskBytesThreshold);
                 if (result.RequiresApproval) result.Events.Add($"RISK-APPROVAL-REQUIRED: operations={result.RiskOperationCount} bytes={result.RiskBytes}");
-                if (!effectiveDryRun && !result.HasPendingConflicts) SaveState(cancellationToken);
+                if (!effectiveDryRun && !result.HasPendingConflicts)
+                {
+                    SaveState(cancellationToken);
+                    SaveEmptyDirectoryState(cancellationToken);
+                }
                 result.Success = true;
                 progress?.Report(new(SyncStage.Completed, processed, all.Count, "", "同步完成"));
             }
@@ -327,11 +338,13 @@ public sealed class SyncEngine
         return denied;
     }
 
-    private static string ScanFingerprint(Dictionary<string, FileEntry> aFiles, Dictionary<string, FileEntry> bFiles)
+    private static string ScanFingerprint(Dictionary<string, FileEntry> aFiles, Dictionary<string, FileEntry> bFiles, HashSet<string> aEmptyDirectories, HashSet<string> bEmptyDirectories)
     {
-        var rows = aFiles.Keys.Union(bFiles.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .Select(path => string.Join("|", path, Stamp(aFiles.GetValueOrDefault(path)), Stamp(bFiles.GetValueOrDefault(path))));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", rows))));
+        var fileRows = aFiles.Keys.Union(bFiles.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Select(path => string.Join("|", "F", path, Stamp(aFiles.GetValueOrDefault(path)), Stamp(bFiles.GetValueOrDefault(path))));
+        var directoryRows = aEmptyDirectories.Union(bEmptyDirectories, StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Select(path => string.Join("|", "D", path, aEmptyDirectories.Contains(path) ? "1" : "-", bEmptyDirectories.Contains(path) ? "1" : "-"));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", fileRows.Concat(directoryRows)))));
     }
 
     private static string Stamp(FileEntry? entry) => entry is null ? "-" : $"{entry.Length}:{entry.LastWriteUtc.Ticks}";
@@ -362,6 +375,80 @@ public sealed class SyncEngine
             catch (ArgumentException) { /* malformed Windows path: ignore safely */ }
         }
         return map;
+    }
+
+    private HashSet<string> ScanEmptyDirectories(string root, Dictionary<string, FileEntry> files, CancellationToken cancellationToken)
+    {
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var enumeration = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        foreach (var path in Directory.EnumerateDirectories(root, "*", enumeration))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (WindowsPathRules.IsReservedDeviceName(Path.GetFileName(path))) continue;
+            try
+            {
+                var info = new DirectoryInfo(path);
+                if (info.Attributes.HasFlag(FileAttributes.Hidden) || info.Attributes.HasFlag(FileAttributes.System) || info.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                var relative = Path.GetRelativePath(root, path);
+                if (!files.Keys.Any(file => file.StartsWith(relative + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) directories.Add(relative);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (ArgumentException) { }
+        }
+        return directories;
+    }
+
+    private async Task ReconcileEmptyDirectoriesAsync(HashSet<string> aDirectories, HashSet<string> bDirectories, Dictionary<string, DirectoryPair> previous, bool dryRun, SyncResult result, CancellationToken cancellationToken)
+    {
+        if (_options.Mode is not (SyncMode.TwoWay or SyncMode.Preview)) return;
+        var all = aDirectories.Union(bDirectories, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(path => path.Count(c => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar))
+            .ThenBy(path => path, StringComparer.OrdinalIgnoreCase);
+        foreach (var relative in all)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var hasA = aDirectories.Contains(relative); var hasB = bDirectories.Contains(relative);
+            if (hasA == hasB) continue;
+            previous.TryGetValue(relative, out var old);
+            var existingOnA = hasA;
+            var existingRoot = existingOnA ? _options.SourcePath : _options.TargetPath;
+            var missingRoot = existingOnA ? _options.TargetPath : _options.SourcePath;
+            var existingSide = existingOnA ? "A" : "B";
+            var missingSide = existingOnA ? "B" : "A";
+            var wasPreviouslyMirrored = old is not null && old.A && old.B;
+            if (_options.Mode == SyncMode.AToB && !existingOnA && _options.PreserveTargetExtras) continue;
+            if (_options.Mode == SyncMode.BToA && existingOnA && _options.PreserveTargetExtras) continue;
+            if (_options.Mode is SyncMode.TwoWay or SyncMode.Preview && wasPreviouslyMirrored)
+            {
+                if (await DeleteEmptyDirectoryAsync(Path.Combine(existingRoot, relative), dryRun, result)) result.DeleteCount++;
+                if (result.Events.LastOrDefault()?.StartsWith("DELETE-EMPTY-DIRECTORY:", StringComparison.Ordinal) != true) continue;
+                result.Events[^1] = $"DELETE-EMPTY-DIRECTORY: {relative} -> {existingSide}";
+                continue;
+            }
+            if (await CreateDirectoryAsync(Path.Combine(missingRoot, relative), dryRun, result))
+            {
+                result.AddCount++;
+                result.Events.Add($"ADD-DIRECTORY: {relative} -> {missingSide}");
+            }
+        }
+    }
+
+    private static Task<bool> CreateDirectoryAsync(string path, bool dryRun, SyncResult result)
+    {
+        if (dryRun) return Task.FromResult(true);
+        try { Directory.CreateDirectory(path); return Task.FromResult(true); }
+        catch (UnauthorizedAccessException) { result.AccessDeniedCount++; throw new InvalidOperationException("SYNC_FILE_ACCESS_DENIED"); }
+        catch (IOException ex) { result.Events.Add($"WARNING: 無法建立資料夾，保留至下輪重試：{path} ({ex.Message})"); return Task.FromResult(false); }
+    }
+
+    private static Task<bool> DeleteEmptyDirectoryAsync(string path, bool dryRun, SyncResult result)
+    {
+        if (dryRun) { result.Events.Add("DELETE-EMPTY-DIRECTORY: preview"); return Task.FromResult(true); }
+        try { Directory.Delete(path, recursive: false); result.Events.Add("DELETE-EMPTY-DIRECTORY: committed"); return Task.FromResult(true); }
+        catch (DirectoryNotFoundException) { return Task.FromResult(false); }
+        catch (UnauthorizedAccessException) { result.AccessDeniedCount++; throw new InvalidOperationException("SYNC_FILE_ACCESS_DENIED"); }
+        catch (IOException ex) { result.Events.Add($"WARNING: 資料夾不再為空或無法刪除，保留至下輪重試：{path} ({ex.Message})"); return Task.FromResult(false); }
     }
 
     private bool ShouldIgnore(FileInfo info, string root)
@@ -413,6 +500,36 @@ public sealed class SyncEngine
         }
     }
 
+    private Dictionary<string, DirectoryPair> LoadEmptyDirectoryState()
+    {
+        var path = EmptyDirectoryStatePath();
+        if (path is null || !File.Exists(path)) return new(StringComparer.OrdinalIgnoreCase);
+        try { return JsonSerializer.Deserialize<Dictionary<string, DirectoryPair>>(File.ReadAllText(path)) ?? new(StringComparer.OrdinalIgnoreCase); }
+        catch
+        {
+            PreserveStateDiagnostic(path);
+            throw new InvalidOperationException("空資料夾同步狀態檔毀損；已保留 diagnostics，為避免誤刪，請重新建立同步基準。");
+        }
+    }
+
+    private string? EmptyDirectoryStatePath() => string.IsNullOrWhiteSpace(_options.StateFilePath) ? null : _options.StateFilePath + ".directories.json";
+
+    private void SaveEmptyDirectoryState(CancellationToken cancellationToken)
+    {
+        var path = EmptyDirectoryStatePath();
+        if (path is null) return;
+        cancellationToken.ThrowIfCancellationRequested();
+        var aFiles = ScanFiles(_options.SourcePath, cancellationToken);
+        var bFiles = ScanFiles(_options.TargetPath, cancellationToken);
+        var a = ScanEmptyDirectories(_options.SourcePath, aFiles, cancellationToken);
+        var b = ScanEmptyDirectories(_options.TargetPath, bFiles, cancellationToken);
+        var state = a.Union(b, StringComparer.OrdinalIgnoreCase).ToDictionary(path => path, path => new DirectoryPair(a.Contains(path), b.Contains(path)), StringComparer.OrdinalIgnoreCase);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temp, path, overwrite: true);
+    }
+
     private static void PreserveStateDiagnostic(string statePath)
     {
         try
@@ -444,4 +561,5 @@ public sealed class SyncEngine
     }
     public sealed record FileStamp(long Length, DateTime LastWriteUtc);
     public sealed record SyncPair(FileStamp? A, FileStamp? B);
+    private sealed record DirectoryPair(bool A, bool B);
 }
