@@ -6,6 +6,8 @@ public sealed class SyncJobDefinition
     public string Name { get; set; } = "未命名同步工作";
     public string SourcePath { get; set; } = "";
     public string TargetPath { get; set; } = "";
+    public bool WebsiteBindingEnabled { get; set; }
+    public string WebsiteBindingConfigPath { get; set; } = "";
     public string SyncFrequency { get; set; } = "Manual";
     public bool IsEnabled { get; set; }
     public bool DeleteProtectionEnabled { get; set; } = true;
@@ -23,12 +25,16 @@ public sealed class SyncJobDefinition
     public DateTimeOffset? NextSyncAt { get; set; }
     public bool IsArchived { get; set; }
 
-    public SyncOptions ToOptions(string appRoot, SyncMode? mode = null, string? requiredPreviewId = null)
+    public string ResolveSourcePath() => WebsiteBindingEnabled
+        ? WebsiteDocumentBindingStore.Read(WebsiteBindingConfigPath).DocumentLibraryRoot
+        : SourcePath;
+
+    public SyncOptions ToOptions(string appRoot, SyncMode? mode = null, string? requiredPreviewId = null, TimeSpan? previewLifetime = null)
     {
         var selectedMode = mode ?? DefaultMode;
         return new()
         {
-            SourcePath = SourcePath,
+            SourcePath = ResolveSourcePath(),
             TargetPath = TargetPath,
             DeleteProtectionEnabled = DeleteProtectionEnabled,
             ConflictCopiesEnabled = ConflictCopiesEnabled,
@@ -44,7 +50,8 @@ public sealed class SyncJobDefinition
             PreviewRootPath = Path.Combine(appRoot, "jobs", Id, "previews"),
             JobId = Id,
             RequiredPreviewId = requiredPreviewId,
-            PendingConflictPath = Path.Combine(appRoot, "jobs", Id, "pending-conflicts.json")
+            PendingConflictPath = Path.Combine(appRoot, "jobs", Id, "pending-conflicts.json"),
+            PreviewLifetime = previewLifetime ?? TimeSpan.FromMinutes(30)
         };
     }
 
@@ -59,7 +66,7 @@ public sealed class SyncJobDefinition
             if (string.IsNullOrWhiteSpace(job.Id) || !ids.Add(job.Id)) throw new InvalidOperationException("同步工作 ID 不可重複。");
             if (string.IsNullOrWhiteSpace(job.Name) || !names.Add(job.Name.Trim())) throw new InvalidOperationException("同步工作名稱不可重複。");
             if (string.IsNullOrWhiteSpace(job.SourcePath) || string.IsNullOrWhiteSpace(job.TargetPath)) throw new InvalidOperationException($"工作「{job.Name}」必須指定 A 與 B 路徑。");
-            var source = Path.GetFullPath(job.SourcePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var source = Path.GetFullPath(job.ResolveSourcePath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var target = Path.GetFullPath(job.TargetPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             if (source.Equals(target, StringComparison.OrdinalIgnoreCase) || source.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || target.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"工作「{job.Name}」的 A／B 必須是獨立資料夾。");
             if (!endpoints.Add(source) || !endpoints.Add(target)) throw new InvalidOperationException("不同同步工作不可重複使用相同的來源或目標路徑。");

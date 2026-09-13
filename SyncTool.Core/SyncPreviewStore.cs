@@ -9,10 +9,12 @@ public sealed class SyncPreviewStore
     private readonly string _root;
     public SyncPreviewStore(string root) => _root = root;
 
-    public SyncPreview Create(string jobId, SyncMode mode, string sourcePath, string targetPath, string fingerprint)
+    public SyncPreview Create(string jobId, SyncMode mode, string sourcePath, string targetPath, string fingerprint, TimeSpan? lifetime = null)
     {
         var now = DateTimeOffset.UtcNow;
-        var preview = new SyncPreview(Guid.NewGuid().ToString("N"), jobId, mode, Normalize(sourcePath), Normalize(targetPath), fingerprint, now, now.AddMinutes(30));
+        var expiresAt = now.Add(lifetime ?? TimeSpan.FromMinutes(30));
+        if (expiresAt <= now || expiresAt > now.AddHours(1)) throw new ArgumentOutOfRangeException(nameof(lifetime), "預覽有效期必須介於 1 秒與 1 小時。");
+        var preview = new SyncPreview(Guid.NewGuid().ToString("N"), jobId, mode, Normalize(sourcePath), Normalize(targetPath), fingerprint, now, expiresAt);
         Directory.CreateDirectory(_root);
         var path = Path.Combine(_root, preview.Id + ".json");
         var temp = path + ".tmp";
@@ -24,7 +26,7 @@ public sealed class SyncPreviewStore
     public bool TryValidate(string previewId, SyncMode mode, string sourcePath, string targetPath, string fingerprint, out string error)
     {
         error = "";
-        if (string.IsNullOrWhiteSpace(previewId)) { error = "單向同步需要有效的預覽 ID。"; return false; }
+        if (string.IsNullOrWhiteSpace(previewId)) { error = "同步需要有效的預覽 ID。"; return false; }
         var path = Path.Combine(_root, previewId + ".json");
         if (!File.Exists(path)) { error = "找不到預覽，請重新建立。"; return false; }
         SyncPreview? preview;

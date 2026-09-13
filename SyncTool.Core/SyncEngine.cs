@@ -22,7 +22,9 @@ public sealed class SyncOptions
     public string? JobId { get; init; }
     public string? RequiredPreviewId { get; init; }
     public string? PendingConflictPath { get; init; }
+    public TimeSpan PreviewLifetime { get; init; } = TimeSpan.FromMinutes(30);
     public IReadOnlyList<string> IgnorePatterns { get; init; } = Array.Empty<string>();
+    public Func<string, bool>? ReadAccessValidator { get; init; }
 }
 
 public sealed class SyncResult
@@ -40,6 +42,7 @@ public sealed class SyncResult
     public int RiskOperationCount { get; set; }
     public long RiskBytes { get; set; }
     public bool RequiresApproval { get; set; }
+    public int AccessDeniedCount { get; set; }
     public List<string> Events { get; } = [];
 }
 
@@ -64,15 +67,18 @@ public sealed class SyncEngine
                 cancellationToken.ThrowIfCancellationRequested();
                 var aFiles = ScanFiles(_options.SourcePath, cancellationToken);
                 var bFiles = ScanFiles(_options.TargetPath, cancellationToken);
+                result.AccessDeniedCount = CountUnreadableFiles(_options.SourcePath, aFiles, cancellationToken)
+                    + CountUnreadableFiles(_options.TargetPath, bFiles, cancellationToken);
+                if (result.AccessDeniedCount > 0) throw new InvalidOperationException("SYNC_FILE_ACCESS_DENIED");
                 var previous = LoadState();
                 var effectiveDryRun = dryRun || _options.Mode == SyncMode.Preview;
                 var fingerprint = ScanFingerprint(aFiles, bFiles);
-                if ((_options.Mode is SyncMode.AToB or SyncMode.BToA) && !string.IsNullOrWhiteSpace(_options.PreviewRootPath))
+                if (_options.Mode != SyncMode.Preview && !string.IsNullOrWhiteSpace(_options.PreviewRootPath))
                 {
                     var previews = new SyncPreviewStore(_options.PreviewRootPath!);
                     if (effectiveDryRun)
                     {
-                        var preview = previews.Create(_options.JobId ?? "standalone", _options.Mode, _options.SourcePath, _options.TargetPath, fingerprint);
+                        var preview = previews.Create(_options.JobId ?? "standalone", _options.Mode, _options.SourcePath, _options.TargetPath, fingerprint, _options.PreviewLifetime);
                         result.PreviewId = preview.Id; result.PreviewExpiresAt = preview.ExpiresAt;
                         result.Events.Add($"PREVIEW: {preview.Id} expires={preview.ExpiresAt:O}");
                     }
@@ -262,10 +268,10 @@ public sealed class SyncEngine
                     return true;
                 }
                 catch (IOException ex) { last = ex; }
-                catch (UnauthorizedAccessException ex)
+                catch (UnauthorizedAccessException)
                 {
-                    result.Events.Add($"WARNING: 無權存取，已略過並保留至下輪重試：{source} ({ex.Message})");
-                    return false;
+                    result.AccessDeniedCount++;
+                    throw new InvalidOperationException("SYNC_FILE_ACCESS_DENIED");
                 }
                 finally
                 {
@@ -275,10 +281,10 @@ public sealed class SyncEngine
             result.Events.Add($"WARNING: 檔案鎖定或無法複製，已略過並保留至下輪重試：{source} ({last?.Message})");
             return false;
         }
-        catch (UnauthorizedAccessException ex)
+        catch (UnauthorizedAccessException)
         {
-            result.Events.Add($"WARNING: 無權建立目標路徑，已略過並保留至下輪重試：{destination} ({ex.Message})");
-            return false;
+            result.AccessDeniedCount++;
+            throw new InvalidOperationException("SYNC_FILE_ACCESS_DENIED");
         }
         catch (DirectoryNotFoundException ex)
         {
@@ -302,6 +308,23 @@ public sealed class SyncEngine
             leftHash.AppendData(leftBuffer, 0, leftRead); rightHash.AppendData(rightBuffer, 0, rightRead);
         }
         return CryptographicOperations.FixedTimeEquals(leftHash.GetHashAndReset(), rightHash.GetHashAndReset());
+    }
+
+    private int CountUnreadableFiles(string root, Dictionary<string, FileEntry> files, CancellationToken cancellationToken)
+    {
+        var denied = 0;
+        foreach (var relative in files.Keys)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var path = Path.Combine(root, relative);
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                if (_options.ReadAccessValidator is not null && !_options.ReadAccessValidator(path)) denied++;
+            }
+            catch (UnauthorizedAccessException) { denied++; }
+        }
+        return denied;
     }
 
     private static string ScanFingerprint(Dictionary<string, FileEntry> aFiles, Dictionary<string, FileEntry> bFiles)

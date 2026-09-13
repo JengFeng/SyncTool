@@ -11,8 +11,10 @@ public sealed class SyncPreviewStoreTests : IDisposable
     {
         var store = new SyncPreviewStore(Path.Combine(_root, "previews"));
         var preview = store.Create("job", SyncMode.AToB, "C:\\A", "D:\\B", "fingerprint");
+        var webPreview = store.Create("web", SyncMode.TwoWay, "C:\\A", "D:\\B", "fingerprint", TimeSpan.FromMinutes(5));
 
         Assert.True(store.TryValidate(preview.Id, SyncMode.AToB, "C:\\A", "D:\\B", "fingerprint", out _));
+        Assert.InRange((webPreview.ExpiresAt - webPreview.CreatedAt).TotalSeconds, 299, 301);
         Assert.False(store.TryValidate(preview.Id, SyncMode.AToB, "C:\\A", "D:\\B", "changed", out var error));
         Assert.Contains("變更", error);
     }

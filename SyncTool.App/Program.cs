@@ -18,14 +18,16 @@ internal static class Program
         var jobArg = args.FirstOrDefault(a => a.StartsWith("--job=", StringComparison.OrdinalIgnoreCase));
         var modeArg = args.FirstOrDefault(a => a.StartsWith("--mode=", StringComparison.OrdinalIgnoreCase));
         var confirmArg = args.FirstOrDefault(a => a.StartsWith("--confirm-preview=", StringComparison.OrdinalIgnoreCase));
+        var previewTtlArg = args.FirstOrDefault(a => a.StartsWith("--preview-ttl-seconds=", StringComparison.OrdinalIgnoreCase));
         if (configured is not null) configPath = configured["--config=".Length..].Trim('"');
         var jobSelector = jobArg is null ? null : jobArg["--job=".Length..].Trim('"');
         var modeSelector = modeArg is null ? null : modeArg["--mode=".Length..].Trim('"');
         var previewId = confirmArg is null ? null : confirmArg["--confirm-preview=".Length..].Trim('"');
+        var previewLifetime = TryParsePreviewLifetime(previewTtlArg);
 
         if (runOnce || dryRun || args.Length > 0)
         {
-            Environment.ExitCode = await RunCliAsync(configPath, runOnce, dryRun, jobSelector, modeSelector, previewId, root);
+            Environment.ExitCode = await RunCliAsync(configPath, runOnce, dryRun, jobSelector, modeSelector, previewId, previewLifetime, root);
             return;
         }
 
@@ -33,7 +35,15 @@ internal static class Program
         Application.Run(new MainForm(configPath));
     }
 
-    private static async Task<int> RunCliAsync(string configPath, bool runOnce, bool dryRun, string? jobSelector, string? modeSelector, string? previewId, string root)
+    private static TimeSpan? TryParsePreviewLifetime(string? argument)
+    {
+        if (argument is null) return null;
+        var value = argument["--preview-ttl-seconds=".Length..];
+        if (!int.TryParse(value, out var seconds) || seconds < 1 || seconds > 3600) throw new ArgumentException("--preview-ttl-seconds 必須介於 1 至 3600。");
+        return TimeSpan.FromSeconds(seconds);
+    }
+
+    private static async Task<int> RunCliAsync(string configPath, bool runOnce, bool dryRun, string? jobSelector, string? modeSelector, string? previewId, TimeSpan? previewLifetime, string root)
     {
         if (runOnce == dryRun || string.IsNullOrWhiteSpace(jobSelector))
         {
@@ -52,11 +62,11 @@ internal static class Program
             var job = config.GetJob(jobSelector);
             SyncStateLayout.MigrateLegacyState(root, job.Id);
             var mode = modeSelector is null ? job.DefaultMode : ParseMode(modeSelector);
-            var result = await new SyncEngine(job.ToOptions(root, mode, previewId)).RunAsync(dryRun);
+            var result = await new SyncEngine(job.ToOptions(root, mode, previewId, previewLifetime)).RunAsync(dryRun);
             job.LastSyncAt = DateTimeOffset.Now;
             var logPath = WriteLog(root, job, result);
             config.Save(configPath);
-            Console.Out.Write(JsonSerializer.Serialize(new { status = result.Success ? "success" : "fail", jobId = job.Id, jobName = job.Name, mode = SyncModeNames.Key(mode), previewId = result.PreviewId, previewExpiresAt = result.PreviewExpiresAt, syncTime = result.SyncTime, addCount = result.AddCount, updateCount = result.UpdateCount, deleteCount = result.DeleteCount, conflictCount = result.ConflictCount, errorMsg = result.ErrorMessage, logPath }));
+            Console.Out.Write(JsonSerializer.Serialize(new { status = result.Success ? "success" : "fail", jobId = job.Id, jobName = job.Name, mode = SyncModeNames.Key(mode), previewId = result.PreviewId, previewExpiresAt = result.PreviewExpiresAt, syncTime = result.SyncTime, addCount = result.AddCount, updateCount = result.UpdateCount, deleteCount = result.DeleteCount, conflictCount = result.ConflictCount, accessDeniedCount = result.AccessDeniedCount, errorMsg = result.ErrorMessage, logPath }));
             return result.Success ? 0 : 1;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); Console.Out.Write(JsonSerializer.Serialize(Failure(ex.Message, root))); return 1; }
@@ -69,7 +79,7 @@ internal static class Program
         throw new ArgumentException("無效的同步模式。");
     }
 
-    private static object Failure(string message, string root) => new { status = "fail", syncTime = DateTime.Now, addCount = 0, updateCount = 0, deleteCount = 0, conflictCount = 0, errorMsg = message, logPath = Path.Combine(root, "jobs") };
+    private static object Failure(string message, string root) => new { status = "fail", syncTime = DateTime.Now, addCount = 0, updateCount = 0, deleteCount = 0, conflictCount = 0, accessDeniedCount = 0, errorMsg = message, logPath = Path.Combine(root, "jobs") };
 
     internal static string WriteLog(string root, SyncJobDefinition job, SyncResult result)
     {

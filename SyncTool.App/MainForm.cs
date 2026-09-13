@@ -149,19 +149,43 @@ public sealed class MainForm : Form
         var isNew = existing is null;
         var job = existing ?? new SyncJobDefinition { Name = "新同步工作", IsEnabled = false };
         var previousMode = job.DefaultMode;
-        using var dialog = new Form { Text = isNew ? "新增同步工作" : "編輯同步工作", ClientSize = new Size(620, 405), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false };
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 3, RowCount = 10 };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+        using var dialog = new Form { Text = isNew ? "新增同步工作" : "編輯同步工作", ClientSize = new Size(700, 515), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 3, RowCount = 13 };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
         var name = new TextBox { Text = job.Name, Dock = DockStyle.Fill }; var source = new TextBox { Text = job.SourcePath, Dock = DockStyle.Fill }; var target = new TextBox { Text = job.TargetPath, Dock = DockStyle.Fill };
+        var binding = new CheckBox { Text = "綁定網站文件庫（A 由網站設定檔決定）", Checked = job.WebsiteBindingEnabled, AutoSize = true };
+        var bindingPath = new TextBox { Text = job.WebsiteBindingConfigPath, Dock = DockStyle.Fill };
         var frequency = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList }; frequency.Items.AddRange(["Manual", "5 分鐘", "10 分鐘", "30 分鐘", "1 小時", "6 小時", "24 小時"]); frequency.SelectedItem = job.SyncFrequency;
         var mode = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, FormattingEnabled = true }; mode.Items.AddRange([SyncMode.TwoWay, SyncMode.AToB, SyncMode.BToA, SyncMode.Preview]); mode.SelectedItem = job.DefaultMode; mode.Format += (_, e) => e.Value = SyncModeNames.Display((SyncMode)e.ListItem!);
         var enabled = new CheckBox { Text = "啟用此工作", Checked = job.IsEnabled }; var preserve = new CheckBox { Text = "單向模式保留目標額外檔案", Checked = job.PreserveTargetExtras }; var deletion = new CheckBox { Text = "刪除保護", Checked = job.DeleteProtectionEnabled }; var conflicts = new CheckBox { Text = "衝突保留雙副本", Checked = job.ConflictCopiesEnabled }; var retry = new CheckBox { Text = "鎖定檔重試", Checked = job.LockRetryEnabled };
-        AddRow(panel, 0, "名稱：", name); AddRow(panel, 1, "來源 A：", source, async button => await PickFolderAsync(source, button)); AddRow(panel, 2, "目標 B：", target, async button => await PickFolderAsync(target, button)); AddRow(panel, 3, "頻率：", frequency); AddRow(panel, 4, "預設模式：", mode);
-        panel.Controls.Add(enabled, 1, 5); panel.Controls.Add(preserve, 1, 6); panel.Controls.Add(deletion, 1, 7); panel.Controls.Add(conflicts, 1, 8); panel.Controls.Add(retry, 2, 8);
+        void RefreshBindingSource()
+        {
+            source.ReadOnly = binding.Checked; source.BackColor = binding.Checked ? Color.FromArgb(245, 245, 245) : SystemColors.Window;
+            bindingPath.Enabled = binding.Checked;
+            if (!binding.Checked) return;
+            try { source.Text = WebsiteDocumentBindingStore.Read(bindingPath.Text.Trim()).DocumentLibraryRoot; }
+            catch { source.Text = "（請選擇或建立有效的網站設定檔）"; }
+        }
+        AddRow(panel, 0, "名稱：", name);
+        var sourcePicker = AddRow(panel, 1, "來源 A：", source, async button => await PickFolderAsync(source, button));
+        AddRow(panel, 2, "目標 B：", target, async button => await PickFolderAsync(target, button));
+        panel.Controls.Add(binding, 1, 3); AddRow(panel, 4, "網站設定檔：", bindingPath, async button => await PickBindingFileAsync(bindingPath, button));
+        var editBinding = Button("變更網站唯一文件庫根…", (_, _) => EditWebsiteBinding(bindingPath, source)); panel.Controls.Add(editBinding, 1, 5);
+        void RefreshBindingControls()
+        {
+            if (sourcePicker is not null) sourcePicker.Visible = !binding.Checked;
+            editBinding.Visible = binding.Checked;
+        }
+        binding.CheckedChanged += (_, _) => { RefreshBindingControls(); RefreshBindingSource(); };
+        bindingPath.TextChanged += (_, _) => { RefreshBindingSource(); RefreshBindingControls(); };
+        AddRow(panel, 6, "頻率：", frequency); AddRow(panel, 7, "預設模式：", mode);
+        panel.Controls.Add(enabled, 1, 8); panel.Controls.Add(preserve, 1, 9); panel.Controls.Add(deletion, 1, 10); panel.Controls.Add(conflicts, 1, 11); panel.Controls.Add(retry, 2, 11);
         var test = Button("測試路徑", (_, _) => TestPaths(source.Text, target.Text)); var save = Button("儲存", (_, _) => dialog.DialogResult = DialogResult.OK); var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill }; actions.Controls.Add(test); actions.Controls.Add(save); actions.Controls.Add(cancel); panel.Controls.Add(actions, 1, 9); dialog.Controls.Add(panel); dialog.AcceptButton = save; dialog.CancelButton = cancel;
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill }; actions.Controls.Add(test); actions.Controls.Add(save); actions.Controls.Add(cancel); panel.Controls.Add(actions, 1, 12); dialog.Controls.Add(panel); dialog.AcceptButton = save; dialog.CancelButton = cancel;
+        RefreshBindingControls();
+        RefreshBindingSource();
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        job.Name = name.Text.Trim(); job.SourcePath = source.Text.Trim(); job.TargetPath = target.Text.Trim(); job.SyncFrequency = frequency.Text; job.DefaultMode = (SyncMode)mode.SelectedItem!; if (previousMode != job.DefaultMode) job.DirectionalModeApproved = false; job.IsEnabled = enabled.Checked; job.PreserveTargetExtras = preserve.Checked; job.DeleteProtectionEnabled = deletion.Checked; job.ConflictCopiesEnabled = conflicts.Checked; job.LockRetryEnabled = retry.Checked;
+        job.Name = name.Text.Trim(); job.SourcePath = source.Text.Trim(); job.TargetPath = target.Text.Trim(); job.WebsiteBindingEnabled = binding.Checked; job.WebsiteBindingConfigPath = bindingPath.Text.Trim(); job.SyncFrequency = frequency.Text; job.DefaultMode = (SyncMode)mode.SelectedItem!; if (previousMode != job.DefaultMode) job.DirectionalModeApproved = false; job.IsEnabled = enabled.Checked; job.PreserveTargetExtras = preserve.Checked; job.DeleteProtectionEnabled = deletion.Checked; job.ConflictCopiesEnabled = conflicts.Checked; job.LockRetryEnabled = retry.Checked;
         try
         {
             SyncJobDefinition.ValidateSet(_config.ActiveJobs.Where(j => !ReferenceEquals(j, job)).Append(job));
@@ -170,13 +194,14 @@ public sealed class MainForm : Form
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "設定無法儲存", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
 
-    private static void AddRow(TableLayoutPanel panel, int row, string label, Control control, Func<Button, Task>? browse = null)
+    private static Button? AddRow(TableLayoutPanel panel, int row, string label, Control control, Func<Button, Task>? browse = null)
     {
         panel.Controls.Add(new Label { Text = label, AutoSize = true }, 0, row); panel.Controls.Add(control, 1, row);
-        if (browse is null) return;
+        if (browse is null) return null;
         Button? button = null;
         button = Button("選擇", async (_, _) => await browse(button!));
         panel.Controls.Add(button, 2, row);
+        return button;
     }
 
     private async Task PickFolderAsync(TextBox box, Button button)
@@ -204,6 +229,49 @@ public sealed class MainForm : Form
             button.Text = originalText;
             button.Enabled = true;
         }
+    }
+
+    private async Task PickBindingFileAsync(TextBox box, Button button)
+    {
+        if (!button.Enabled) return;
+        button.Enabled = false;
+        var originalText = button.Text;
+        button.Text = "選擇中…";
+        try
+        {
+            var selected = await StaTask.RunAsync(() =>
+            {
+                using var dialog = new OpenFileDialog { Title = "選擇網站文件庫設定檔", Filter = "JSON 設定檔 (*.json)|*.json|所有檔案 (*.*)|*.*", CheckFileExists = false, CheckPathExists = true };
+                return dialog.ShowDialog() == DialogResult.OK ? dialog.FileName : null;
+            });
+            if (!string.IsNullOrWhiteSpace(selected)) box.Text = selected;
+        }
+        catch (Exception ex) { MessageBox.Show(this, $"無法選擇網站設定檔：{ex.Message}", "SyncTool", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        finally { button.Text = originalText; button.Enabled = true; }
+    }
+
+    private void EditWebsiteBinding(TextBox bindingPath, TextBox source)
+    {
+        using var dialog = new Form { Text = "檢視／修改網站文件庫對應", ClientSize = new Size(670, 185), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(14), ColumnCount = 3, RowCount = 3 };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
+        var path = new TextBox { Text = bindingPath.Text, Dock = DockStyle.Fill };
+        var root = new TextBox { Text = source.Text.StartsWith('（') ? "" : source.Text, Dock = DockStyle.Fill };
+        AddRow(panel, 0, "網站設定檔：", path, async button => await PickBindingFileAsync(path, button));
+        AddRow(panel, 1, "文件庫根：", root, async button => await PickFolderAsync(root, button));
+        var save = Button("驗證並儲存", (_, _) =>
+        {
+            try
+            {
+                WebsiteDocumentBindingStore.Write(path.Text.Trim(), root.Text.Trim());
+                bindingPath.Text = Path.GetFullPath(path.Text.Trim()); source.Text = WebsiteDocumentBindingStore.Read(bindingPath.Text).DocumentLibraryRoot;
+                dialog.DialogResult = DialogResult.OK;
+            }
+            catch (Exception ex) { MessageBox.Show(dialog, ex.Message, "網站對應無法儲存", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        });
+        var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill }; actions.Controls.Add(save); actions.Controls.Add(cancel); panel.Controls.Add(actions, 1, 2);
+        dialog.Controls.Add(panel); dialog.AcceptButton = save; dialog.CancelButton = cancel; dialog.ShowDialog(this);
     }
 
     private void TestPaths(string source, string target)
