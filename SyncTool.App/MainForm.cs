@@ -330,7 +330,7 @@ public sealed class MainForm : Form
     private async Task<SyncResult> RunWithControlAsync(SyncJobDefinition job, bool dryRun, IProgress<SyncProgress> progress, CancellationToken cancellationToken)
     {
         var mode = job.DefaultMode;
-        if (dryRun || mode is SyncMode.TwoWay or SyncMode.Preview)
+        if (dryRun || mode is SyncMode.Preview)
             return await Task.Run(async () => await new SyncEngine(job.ToOptions(AppContext.BaseDirectory, mode)).RunAsync(dryRun, progress, cancellationToken), cancellationToken);
 
         var preview = await Task.Run(async () => await new SyncEngine(job.ToOptions(AppContext.BaseDirectory, mode)).RunAsync(true, progress, cancellationToken), cancellationToken);
@@ -339,7 +339,7 @@ public sealed class MainForm : Form
             return await Task.Run(async () => await new SyncEngine(job.ToOptions(AppContext.BaseDirectory, mode, preview.PreviewId)).RunAsync(false, progress, cancellationToken), cancellationToken);
         var riskNotice = preview.RequiresApproval ? $"\r\n⚠ 超過安全門檻：高風險操作 {preview.RiskOperationCount:N0} 項，影響 {preview.RiskBytes / 1024d / 1024d / 1024d:F2} GiB。" : "";
         var summary = $"模式：{SyncModeNames.Display(mode)}\r\n新增：{preview.AddCount:N0}\r\n更新：{preview.UpdateCount:N0}\r\n備份後移除：{preview.DeleteCount:N0}\r\n衝突：{preview.ConflictCount:N0}{riskNotice}\r\n\r\n預覽 ID：{preview.PreviewId}\r\n有效至：{preview.PreviewExpiresAt?.ToLocalTime():yyyy/MM/dd HH:mm}\r\n\r\n確認後才會寫入。是否套用？";
-        if (MessageBox.Show(this, summary, "確認單向同步預覽", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return preview;
+        if (MessageBox.Show(this, summary, "確認同步預覽", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return preview;
         job.DirectionalModeApproved = true;
         return await Task.Run(async () => await new SyncEngine(job.ToOptions(AppContext.BaseDirectory, mode, preview.PreviewId)).RunAsync(false, progress, cancellationToken), cancellationToken);
     }

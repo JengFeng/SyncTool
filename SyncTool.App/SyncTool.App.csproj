@@ -7,10 +7,10 @@
     <Nullable>enable</Nullable>
     <AssemblyName>SyncTool</AssemblyName>
     <ApplicationIcon>Assets\SyncTool.ico</ApplicationIcon>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
-    <InformationalVersion>1.1.0</InformationalVersion>
+    <Version>1.1.1</Version>
+    <AssemblyVersion>1.1.1.0</AssemblyVersion>
+    <FileVersion>1.1.1.0</FileVersion>
+    <InformationalVersion>1.1.1</InformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SyncTool.Core\SyncTool.Core.csproj" />
