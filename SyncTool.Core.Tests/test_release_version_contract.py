@@ -1,7 +1,7 @@
 from pathlib import Path
 project = Path(__file__).resolve().parents[1] / 'SyncTool.App' / 'SyncTool.App.csproj'
 source = project.read_text(encoding='utf-8')
-for expected in ('<Version>1.1.2</Version>', '<AssemblyVersion>1.1.2.0</AssemblyVersion>', '<FileVersion>1.1.2.0</FileVersion>', '<InformationalVersion>1.1.2</InformationalVersion>'):
+for expected in ('<Version>1.1.3</Version>', '<AssemblyVersion>1.1.3.0</AssemblyVersion>', '<FileVersion>1.1.3.0</FileVersion>', '<InformationalVersion>1.1.3</InformationalVersion>'):
     if expected not in source:
         raise SystemExit(f'MISSING_VERSION_FIELD: {expected}')
 print('SYNCTOOL_RELEASE_VERSION_CONTRACT_OK')

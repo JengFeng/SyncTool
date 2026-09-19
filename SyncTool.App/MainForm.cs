@@ -65,6 +65,7 @@ public sealed class MainForm : Form
         AddRunLockedButton("預覽備份清理", (_, _) => { if (_selected is not null) ShowBackupCleanupPreview(_selected); });
         AddRunLockedButton("處理待決衝突", (_, _) => { if (_selected is not null) ShowPendingConflicts(_selected); });
         AddRunLockedButton("同步全部已啟用工作", async (_, _) => await RunAllAsync());
+        topButtons.Controls.Add(Button("版本資訊", (_, _) => ShowVersionInfo()));
 
         var jobsPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 0, 5) };
         jobsPanel.Controls.Add(_jobs); jobsPanel.Controls.Add(topButtons); jobsPanel.Controls.Add(titlePanel);
@@ -91,6 +92,13 @@ public sealed class MainForm : Form
     }
 
     private static Button Button(string text, EventHandler handler) { var button = new Button { Text = text, AutoSize = true, BackColor = Color.FromArgb(0, 120, 212), ForeColor = Color.White, FlatStyle = FlatStyle.Flat }; button.Click += handler; return button; }
+
+    private void ShowVersionInfo()
+    {
+        var info = BuildVersionInfo.Load();
+        var text = $"應用程式版本：{info.AppVersion}\r\nGit Commit：{info.GitCommit}\r\nCommit 版本：{info.GitVersion}\r\n最新 Commit 時間：{info.CommitTime}\r\nGitHub Repository：{info.Repository}\r\nGit 狀態：{info.WorkingTree}";
+        MessageBox.Show(this, text, "版本資訊", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
 
     private void ShowModeToolTip(Point location)
     {
